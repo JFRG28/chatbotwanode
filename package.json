@@ -19,7 +19,9 @@
   },
   "homepage": "https://github.com/JFRG28/chatbotwanode#readme",
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "node-fetch": "^2.7.0"
   }
 }
