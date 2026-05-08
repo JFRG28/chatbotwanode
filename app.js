@@ -67,8 +67,11 @@ app.post("/webhook", async (req, res) => {
             console.log(`Mensaje procesado para: ${from}`);
 
             // Ahora sí, llamamos a la IA y enviamos
+            console.log(`📩 Mensaje de ${from}: ${userText}`);
             const aiReply = await getAiResponse(from, userText);
+            console.log(`🤖 IA responde: ${aiReply}`); // Esto te permitirá ver qué dice Gemini antes de enviarlo
             await sendWhatsAppMessage(from, aiReply);
+            console.log(`✅ Respuesta enviada con éxito a WhatsApp`);
         }
         res.sendStatus(200);
     } else {
