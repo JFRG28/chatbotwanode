@@ -2,8 +2,6 @@ const {GoogleGenerativeAI} = require("@google/generative-ai");
 const {defineSecret} = require("firebase-functions/params");
 const fs = require("fs");
 const path = require("path");
-const pdf = require("pdf-parse");
-const xlsx = require("xlsx");
 
 // Define the secret (it will be configured in Google Cloud Secret Manager)
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
@@ -94,20 +92,8 @@ async function inicializarConocimientoMVP() {
     try {
       let content = "";
 
-      if (ext === ".txt" || ext === ".csv") {
+      if (ext === ".md") {
         content = fs.readFileSync(filePath, "utf-8");
-      } else if (ext === ".pdf") {
-        const dataBuffer = fs.readFileSync(filePath);
-        const data = await pdf(dataBuffer);
-        content = data.text;
-      } else if (ext === ".xlsx" || ext === ".xls") {
-        const workbook = xlsx.readFile(filePath);
-        // Combine all sheets into a single text block
-        for (const sheetName of workbook.SheetNames) {
-          const sheet = workbook.Sheets[sheetName];
-          const csvData = xlsx.utils.sheet_to_csv(sheet);
-          content += `\n--- Sheet: ${sheetName} ---\n${csvData}`;
-        }
       } else {
         console.log(`Formato no soportado, saltando: ${file}`);
         continue;
