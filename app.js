@@ -1,7 +1,7 @@
 const express = require("express");
 const axios = require("axios");
 const dotenv = require("dotenv");
-const { getAiResponse } = require("./aiService"); // Importamos el servicio de IA
+const { getAiResponse } = require("./functions/aiService"); // Importamos el servicio de IA
 
 dotenv.config();
 const app = express();
