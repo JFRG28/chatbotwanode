@@ -98,6 +98,6 @@ exports.api = onRequest({
     geminiApiKey,
     phoneNumberId,
     whatsappApiToken,
-    "WHATSAPP_VERIFY_TOKEN",
+    whatsappVerifyToken,
   ],
 }, app);

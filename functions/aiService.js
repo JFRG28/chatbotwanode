@@ -1,5 +1,9 @@
 const {GoogleGenerativeAI} = require("@google/generative-ai");
 const {defineSecret} = require("firebase-functions/params");
+const fs = require("fs");
+const path = require("path");
+const pdf = require("pdf-parse");
+const xlsx = require("xlsx");
 
 // Define the secret (it will be configured in Google Cloud Secret Manager)
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
@@ -53,28 +57,73 @@ function cosineSimilarity(vecA, vecB) {
 }
 
 /**
- * Initializes the MVP knowledge base by loading predefined documents.
+ * Chunks text into smaller, overlapping segments to stay within embedding
+ * limits and improve semantic search.
+ * @param {string} text - The full text to chunk.
+ * @return {string[]} An array of text chunks.
+ */
+function chunkText(text) {
+  // A simple chunking strategy: split by paragraphs or newlines
+  // In a production system, you might want overlapping chunks of ~500 tokens.
+  const chunks = text.split(/\n\s*\n/);
+  return chunks.map((c) => c.trim()).filter((c) => c.length > 20);
+}
+
+/**
+ * Initializes the knowledge base by reading files from functions/source_docs.
  */
 async function inicializarConocimientoMVP() {
   if (isKnowledgeInitialized) return;
 
-  console.log("🛠️ Cargando información de Kia Finance...");
+  console.log("🛠️ Cargando documentos desde source_docs...");
+  const docsDir = path.join(__dirname, "source_docs");
 
-  const contenidoDocumento = [
-    "Beneficios Kia Finance: Autorización en 20 min, enganche desde el 10% " +
-    "y plazos hasta 72 meses sin penalización por abonos a capital.",
-    "Plan Kia Fidelity: Programa de incentivos para clientes actuales " +
-    "de Kia. Ofrece -2% en tasa de interés o los primeros 2 servicios " +
-    "de mantenimiento gratis.",
-    "Kia Crédito Simple y con Anualidad: El crédito simple tiene tasa y " +
-    "pagos fijos. El crédito con anualidad permite pagos anuales " +
-    "programados para reducir la mensualidad.",
-  ];
-
-  for (const texto of contenidoDocumento) {
-    await ingestDocument(texto, "Crédito Simple o con anualidad_v1.2");
+  if (!fs.existsSync(docsDir)) {
+    console.log(`⚠️ Directorio no encontrado: ${docsDir}.`);
+    isKnowledgeInitialized = true;
+    return;
   }
-  console.log("✅ Conocimiento del MVP cargado en memoria.");
+
+  const files = fs.readdirSync(docsDir);
+
+  for (const file of files) {
+    const filePath = path.join(docsDir, file);
+    const ext = path.extname(file).toLowerCase();
+    console.log(`Leyendo archivo: ${file}`);
+
+    try {
+      let content = "";
+
+      if (ext === ".txt" || ext === ".csv") {
+        content = fs.readFileSync(filePath, "utf-8");
+      } else if (ext === ".pdf") {
+        const dataBuffer = fs.readFileSync(filePath);
+        const data = await pdf(dataBuffer);
+        content = data.text;
+      } else if (ext === ".xlsx" || ext === ".xls") {
+        const workbook = xlsx.readFile(filePath);
+        // Combine all sheets into a single text block
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          const csvData = xlsx.utils.sheet_to_csv(sheet);
+          content += `\n--- Sheet: ${sheetName} ---\n${csvData}`;
+        }
+      } else {
+        console.log(`Formato no soportado, saltando: ${file}`);
+        continue;
+      }
+
+      // Chunk the content and ingest
+      const chunks = chunkText(content);
+      for (const [index, chunk] of chunks.entries()) {
+        await ingestDocument(chunk, `${file} (Parte ${index + 1})`);
+      }
+    } catch (error) {
+      console.error(`Error procesando archivo ${file}:`, error);
+    }
+  }
+
+  console.log("✅ Conocimiento de archivos cargado en memoria.");
   isKnowledgeInitialized = true;
 }
 
@@ -89,7 +138,11 @@ async function getAiResponse(userId, userMessage) {
     // Inicialización perezosa: el valor del secreto (.value())
     // SOLO está disponible durante la ejecución de la función
     if (!genAI) {
-      genAI = new GoogleGenerativeAI(geminiApiKey.value());
+      const apiKey = geminiApiKey.value() || process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error("GEMINI_API_KEY no está configurada o es inválida.");
+      }
+      genAI = new GoogleGenerativeAI(apiKey);
       embeddingModel = genAI.getGenerativeModel({model: "gemini-embedding-2"});
     }
 
