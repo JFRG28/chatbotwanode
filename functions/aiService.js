@@ -83,16 +83,28 @@ async function getAiResponse(userId, userMessage) {
     const userEmbedResult = await embeddingModel.embedContent(userMessage);
     const userVector = userEmbedResult.embedding.values;
 
-    // Buscar el fragmento más similar
+    // Buscamos todos los fragmentos que superen un umbral de similitud
+    const SIMILARITY_THRESHOLD = 0.35; // Ajustable según pruebas
     const relevantDocs = vectorDatabase
         .map((doc) => ({
           ...doc,
           score: cosineSimilarity(userVector, doc.embedding),
         }))
+        .filter((doc) => doc.score >= SIMILARITY_THRESHOLD)
         .sort((a, b) => b.score - a.score);
 
-    const topContext = relevantDocs.length > 0 ?
-      relevantDocs[0].text : "No hay información específica disponible.";
+    // Si no hay nada por encima del umbral, tomamos al menos el más cercano
+    // para que la IA tenga algo de qué hablar.
+    const contextChunks = relevantDocs.length > 0 ?
+      relevantDocs :
+      [vectorDatabase.map((doc) => ({
+        ...doc,
+        score: cosineSimilarity(userVector, doc.embedding),
+      })).sort((a, b) => b.score - a.score)[0]];
+
+    const topContext = contextChunks
+        .map((d) => d.text)
+        .join("\n---\n");
 
     // Manejo de sesión de chat
     if (!chatContexts.has(userId)) {
