@@ -11,31 +11,33 @@ let genAI = null;
 let embeddingModel = null;
 let isKnowledgeInitialized = false;
 
-// Base de datos vectorial en memoria para el MVP
-const vectorDatabase = [];
+// Base de datos vectorial en memoria
+let vectorDatabase = [];
 const chatContexts = new Map();
 
 /**
- * Ingests a document by creating an embedding and storing it.
- * @param {string} text - The text to ingest.
- * @param {string} sourceName - The source of the text.
+ * Initializes the knowledge base by reading the pre-calculated
+ * knowledge.json file.
  */
-async function ingestDocument(text, sourceName) {
-  try {
-    const result = await embeddingModel.embedContent(text);
-    vectorDatabase.push({
-      embedding: result.embedding.values,
-      text: text,
-      source: sourceName,
-    });
-  } catch (error) {
-    console.error(
-        `Error ingiriendo fragmento de ${sourceName}:`,
-        error.message,
-    );
-  }
-}
+function inicializarConocimientoMVP() {
+  if (isKnowledgeInitialized) return;
 
+  try {
+    const knowledgePath = path.join(__dirname, "knowledge.json");
+    if (fs.existsSync(knowledgePath)) {
+      console.log("🛠️ Cargando conocimiento pre-calculado...");
+      const rawData = fs.readFileSync(knowledgePath, "utf-8");
+      vectorDatabase = JSON.parse(rawData);
+      console.log(`✅ Conocimiento cargado: ${vectorDatabase.length} chunks.`);
+    } else {
+      console.log("⚠️ knowledge.json no encontrado.");
+    }
+  } catch (error) {
+    console.error("❌ Error cargando knowledge.json:", error);
+  }
+
+  isKnowledgeInitialized = true;
+}
 /**
  * Calculates the cosine similarity between two vectors.
  * @param {number[]} vecA - First vector.
@@ -52,65 +54,6 @@ function cosineSimilarity(vecA, vecB) {
     normB += vecB[i] * vecB[i];
   }
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-}
-
-/**
- * Chunks text into smaller, overlapping segments to stay within embedding
- * limits and improve semantic search.
- * @param {string} text - The full text to chunk.
- * @return {string[]} An array of text chunks.
- */
-function chunkText(text) {
-  // A simple chunking strategy: split by paragraphs or newlines
-  // In a production system, you might want overlapping chunks of ~500 tokens.
-  const chunks = text.split(/\n\s*\n/);
-  return chunks.map((c) => c.trim()).filter((c) => c.length > 20);
-}
-
-/**
- * Initializes the knowledge base by reading files from functions/source_docs.
- */
-async function inicializarConocimientoMVP() {
-  if (isKnowledgeInitialized) return;
-
-  console.log("🛠️ Cargando documentos desde source_docs...");
-  const docsDir = path.join(__dirname, "source_docs");
-
-  if (!fs.existsSync(docsDir)) {
-    console.log(`⚠️ Directorio no encontrado: ${docsDir}.`);
-    isKnowledgeInitialized = true;
-    return;
-  }
-
-  const files = fs.readdirSync(docsDir);
-
-  for (const file of files) {
-    const filePath = path.join(docsDir, file);
-    const ext = path.extname(file).toLowerCase();
-    console.log(`Leyendo archivo: ${file}`);
-
-    try {
-      let content = "";
-
-      if (ext === ".md") {
-        content = fs.readFileSync(filePath, "utf-8");
-      } else {
-        console.log(`Formato no soportado, saltando: ${file}`);
-        continue;
-      }
-
-      // Chunk the content and ingest
-      const chunks = chunkText(content);
-      for (const [index, chunk] of chunks.entries()) {
-        await ingestDocument(chunk, `${file} (Parte ${index + 1})`);
-      }
-    } catch (error) {
-      console.error(`Error procesando archivo ${file}:`, error);
-    }
-  }
-
-  console.log("✅ Conocimiento de archivos cargado en memoria.");
-  isKnowledgeInitialized = true;
 }
 
 /**
