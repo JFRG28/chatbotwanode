@@ -205,6 +205,7 @@ async function getAiResponse(userId, userMessage, baseUrl) {
 
     let result = await chat.sendMessage(augmentedMessage);
     let response = await result.response;
+    let finalDownloadLink = "";
 
     const calls = response.functionCalls();
     if (calls && calls.length > 0) {
@@ -214,11 +215,11 @@ async function getAiResponse(userId, userMessage, baseUrl) {
       if (call.name === "scheduleAppointment") {
         const toolRes = scheduleAppointment(call.args);
 
-        // Si fue exitoso, añadimos el link de descarga
+        // Si fue exitoso, generamos el link
         if (toolRes.status === "success" && baseUrl) {
-          const downloadUrl =
-              `${baseUrl}/download-ics/${toolRes.appointmentId}`;
-          toolRes.message += `\n\n[LINK DE DESCARGA]: ${downloadUrl}`;
+          const apptId = toolRes.appointmentId;
+          finalDownloadLink = `${baseUrl}/download-ics/${apptId}`;
+          console.log(`🔗 Link generado: ${finalDownloadLink}`);
         }
 
         result = await chat.sendMessage([{
@@ -231,7 +232,12 @@ async function getAiResponse(userId, userMessage, baseUrl) {
       }
     }
 
-    return response.text();
+    let finalResponse = response.text();
+    if (finalDownloadLink) {
+      finalResponse += `\n\n📅 [AGREGAR AL CALENDARIO]: ${finalDownloadLink}`;
+    }
+
+    return finalResponse;
   } catch (error) {
     console.error("Error en getAiResponse:", error);
     return "Lo siento, tuve un problema al consultar mis manuales.";

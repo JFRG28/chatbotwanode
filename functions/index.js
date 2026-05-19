@@ -119,10 +119,31 @@ app.get("/download-ics/:id", (req, res) => {
       return res.status(404).send("Cita no encontrada.");
     }
 
-    // Formatear fecha para ICS (YYYYMMDDTHHmmSSZ)
-    const cleanDate = appt.date.replace(/-/g, "");
-    // Simplificación de hora (esto es un prototipo)
-    const cleanTime = "090000";
+    // Parsear fecha y hora
+    const [y, m, d] = appt.date.split("-").map(Number);
+    let hours = 9;
+    let mins = 0;
+    const tMatch = appt.time.match(/(\d+):(\d+)\s*(AM|PM)?/i);
+    if (tMatch) {
+      hours = parseInt(tMatch[1]);
+      mins = parseInt(tMatch[2]);
+      const ampm = tMatch[3] ? tMatch[3].toUpperCase() : null;
+      if (ampm === "PM" && hours < 12) hours += 12;
+      if (ampm === "AM" && hours === 12) hours = 0;
+    }
+
+    const startDate = new Date(y, m - 1, d, hours, mins);
+    const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+
+    const fmt = (date) => {
+      const p = (n) => n.toString().padStart(2, "0");
+      const yy = date.getFullYear();
+      const mm = p(date.getMonth() + 1);
+      const dd = p(date.getDate());
+      const hh = p(date.getHours());
+      const min = p(date.getMinutes());
+      return `${yy}${mm}${dd}T${hh}${min}00`;
+    };
 
     const icsContent = [
       "BEGIN:VCALENDAR",
@@ -131,8 +152,8 @@ app.get("/download-ics/:id", (req, res) => {
       "BEGIN:VEVENT",
       `UID:${appt.id}@kiafinance.com`,
       `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").split(".")[0]}Z`,
-      `DTSTART:${cleanDate}T${cleanTime}`,
-      `DTEND:${cleanDate}T100000`,
+      `DTSTART:${fmt(startDate)}`,
+      `DTEND:${fmt(endDate)}`,
       `SUMMARY:Cita Kia Finance - ${appt.carModel}`,
       `DESCRIPTION:Cita de ${appt.fullName} para ${appt.carModel}`,
       "LOCATION:Agencia Kia Local",
