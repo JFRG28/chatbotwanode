@@ -16,6 +16,74 @@ let vectorDatabase = [];
 const chatContexts = new Map();
 
 /**
+ * MOCK: Saves an appointment to a local file.
+ * In production, this would call a CRM or Calendar API.
+ * @param {Object} args - The appointment details.
+ * @return {Object} Confirmation result.
+ */
+function scheduleAppointment(args) {
+  try {
+    const appointmentsPath = path.join(__dirname, "appointments.json");
+    let appointments = [];
+    if (fs.existsSync(appointmentsPath)) {
+      const fileData = fs.readFileSync(appointmentsPath, "utf-8");
+      appointments = JSON.parse(fileData);
+    }
+    const apptId = Date.now();
+    const newAppointment = {
+      id: apptId,
+      ...args,
+      status: "scheduled",
+      createdAt: new Date().toISOString(),
+    };
+    appointments.push(newAppointment);
+    fs.writeFileSync(appointmentsPath, JSON.stringify(appointments, null, 2));
+    return {
+      status: "success",
+      appointmentId: apptId,
+      message: `Cita agendada: ${args.fullName} el ${args.date} ` +
+          `a las ${args.time}.`,
+    };
+  } catch (error) {
+    console.error("Error scheduling appointment:", error);
+    return {status: "error", message: "No se pudo agendar la cita."};
+  }
+}
+
+const tools = [
+  {
+    functionDeclarations: [
+      {
+        name: "scheduleAppointment",
+        description: "Agenda una cita para un cliente en una agencia.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            fullName: {
+              type: "STRING",
+              description: "Nombre completo del cliente.",
+            },
+            date: {
+              type: "STRING",
+              description: "Fecha de la cita (ej. 2026-05-20).",
+            },
+            time: {
+              type: "STRING",
+              description: "Hora de la cita (ej. 10:00 AM).",
+            },
+            carModel: {
+              type: "STRING",
+              description: "Modelo de auto de interés.",
+            },
+          },
+          required: ["fullName", "date", "time"],
+        },
+      },
+    ],
+  },
+];
+
+/**
  * Initializes the knowledge base by reading the pre-calculated
  * knowledge.json file.
  */
@@ -38,6 +106,7 @@ function inicializarConocimientoMVP() {
 
   isKnowledgeInitialized = true;
 }
+
 /**
  * Calculates the cosine similarity between two vectors.
  * @param {number[]} vecA - First vector.
@@ -60,12 +129,11 @@ function cosineSimilarity(vecA, vecB) {
  * Gets a response from the AI using RAG based on the user's message.
  * @param {string} userId - The unique identifier for the user.
  * @param {string} userMessage - The message sent by the user.
+ * @param {string} baseUrl - The base URL for generating links.
  * @return {Promise<string>} The AI's response text.
  */
-async function getAiResponse(userId, userMessage) {
+async function getAiResponse(userId, userMessage, baseUrl) {
   try {
-    // Inicialización perezosa: el valor del secreto (.value())
-    // SOLO está disponible durante la ejecución de la función
     if (!genAI) {
       const apiKey = geminiApiKey.value() || process.env.GEMINI_API_KEY;
       if (!apiKey) {
@@ -79,12 +147,10 @@ async function getAiResponse(userId, userMessage) {
       await inicializarConocimientoMVP();
     }
 
-    // Generar embedding de la pregunta
     const userEmbedResult = await embeddingModel.embedContent(userMessage);
     const userVector = userEmbedResult.embedding.values;
 
-    // Buscamos todos los fragmentos que superen un umbral de similitud
-    const SIMILARITY_THRESHOLD = 0.35; // Ajustable según pruebas
+    const SIMILARITY_THRESHOLD = 0.35;
     const relevantDocs = vectorDatabase
         .map((doc) => ({
           ...doc,
@@ -93,8 +159,6 @@ async function getAiResponse(userId, userMessage) {
         .filter((doc) => doc.score >= SIMILARITY_THRESHOLD)
         .sort((a, b) => b.score - a.score);
 
-    // Si no hay nada por encima del umbral, tomamos al menos el más cercano
-    // para que la IA tenga algo de qué hablar.
     const contextChunks = relevantDocs.length > 0 ?
       relevantDocs :
       [vectorDatabase.map((doc) => ({
@@ -106,22 +170,26 @@ async function getAiResponse(userId, userMessage) {
         .map((d) => d.text)
         .join("\n---\n");
 
-    // Manejo de sesión de chat
     if (!chatContexts.has(userId)) {
-      // Nota: systemInstruction va aquí para evitar el error
-      // de [400 Bad Request]
+      const today = new Date().toLocaleDateString("es-MX", {
+        year: "numeric", month: "long", day: "numeric",
+      });
       const model = genAI.getGenerativeModel({
         model: "gemini-2.5-flash",
-        systemInstruction: "Eres Duque, un asistente experto en Kia " +
-                "Finance.\n" +
-                "Tu personalidad es amable y profesional.\n" +
-                "REGLAS CRÍTICAS:\n" +
-                "1. No uses menús numéricos (ej. \"Marca 1 para ventas\").\n" +
-                "2. Mantén respuestas breves y directas.\n" +
-                "3. Usa un tono amable y profesional.\n" +
-                "4. Si te preguntan algo fuera del contexto que se te " +
-                "proporciona, dile que no tienes esa información y " +
-                "sugiérele contactar a una agencia.",
+        tools: tools,
+        systemInstruction: `Eres Duque, un asistente de Kia Finance.\n` +
+                `Hoy es ${today}.\n` +
+                `Tu personalidad es amable y profesional.\n` +
+                `REGLA DE ORO: NUNCA confirmes una cita sin haber usado ` +
+                `primero la herramienta 'scheduleAppointment'.\n` +
+                `Si el cliente quiere una cita, debes pedirle:\n` +
+                `1. Nombre completo\n2. Fecha\n3. Hora\n4. Modelo de auto\n` +
+                `Cuando tengas los 4 datos, LLAMA a 'scheduleAppointment'.\n` +
+                `REGLAS CRÍTICAS:\n` +
+                `- No uses menús numéricos.\n` +
+                `- Mantén respuestas breves.\n` +
+                `- Si no tienes información en el CONTEXTO, sugiere ` +
+                `contactar a una agencia.`,
       });
 
       const chatSession = model.startChat({
@@ -132,15 +200,36 @@ async function getAiResponse(userId, userMessage) {
     }
 
     const chat = chatContexts.get(userId);
-
-    // Inyectamos el contexto directamente en el mensaje del usuario
-    // para evitar el error de systemInstruction y para asegurar que
-    // el contexto se actualice en cada mensaje dinámicamente.
     const augmentedMessage = `CONTEXTO PARA RESPONDER: ${topContext}\n\n` +
       `PREGUNTA DEL USUARIO: ${userMessage}`;
 
-    const result = await chat.sendMessage(augmentedMessage);
-    const response = await result.response;
+    let result = await chat.sendMessage(augmentedMessage);
+    let response = await result.response;
+
+    const calls = response.functionCalls();
+    if (calls && calls.length > 0) {
+      const call = calls[0];
+      console.log(`🛠️ AI llamando a herramienta: ${call.name}`, call.args);
+
+      if (call.name === "scheduleAppointment") {
+        const toolRes = scheduleAppointment(call.args);
+
+        // Si fue exitoso, añadimos el link de descarga
+        if (toolRes.status === "success" && baseUrl) {
+          const downloadUrl =
+              `${baseUrl}/download-ics/${toolRes.appointmentId}`;
+          toolRes.message += `\n\n[LINK DE DESCARGA]: ${downloadUrl}`;
+        }
+
+        result = await chat.sendMessage([{
+          functionResponse: {
+            name: "scheduleAppointment",
+            response: toolRes,
+          },
+        }]);
+        response = await result.response;
+      }
+    }
 
     return response.text();
   } catch (error) {

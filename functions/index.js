@@ -77,7 +77,15 @@ app.post("/webhook", async (req, res) => {
 
       // Ahora sí, llamamos a la IA y enviamos
       console.log(`📩 Mensaje de ${from}: ${userText}`);
-      const aiReply = await getAiResponse(from, userText);
+
+      // Construimos la URL base para los links de descarga
+      const protocol = req.protocol;
+      const host = req.get("host");
+      // K_SERVICE es el nombre de la función en Firebase v2 (ej. 'api')
+      const functionName = process.env.K_SERVICE || "api";
+      const baseUrl = `${protocol}://${host}/${functionName}`;
+
+      const aiReply = await getAiResponse(from, userText, baseUrl);
       // Esto te permitirá ver qué dice Gemini antes de enviarlo
       console.log(`🤖 IA responde: ${aiReply}`);
       await sendWhatsAppMessage(from, aiReply);
@@ -86,6 +94,58 @@ app.post("/webhook", async (req, res) => {
     res.sendStatus(200);
   } else {
     res.sendStatus(404);
+  }
+});
+
+/**
+ * Endpoint para descargar el archivo .ics de la cita.
+ */
+app.get("/download-ics/:id", (req, res) => {
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    const appointmentsPath = path.join(__dirname, "appointments.json");
+
+    if (!fs.existsSync(appointmentsPath)) {
+      return res.status(404).send("No hay citas registradas.");
+    }
+
+    const raw = fs.readFileSync(appointmentsPath, "utf-8");
+    const appointments = JSON.parse(raw);
+    const apptId = req.params.id;
+    const appt = appointments.find((a) => a.id.toString() === apptId);
+
+    if (!appt) {
+      return res.status(404).send("Cita no encontrada.");
+    }
+
+    // Formatear fecha para ICS (YYYYMMDDTHHmmSSZ)
+    const cleanDate = appt.date.replace(/-/g, "");
+    // Simplificación de hora (esto es un prototipo)
+    const cleanTime = "090000";
+
+    const icsContent = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Kia Finance//Duque//ES",
+      "BEGIN:VEVENT",
+      `UID:${appt.id}@kiafinance.com`,
+      `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").split(".")[0]}Z`,
+      `DTSTART:${cleanDate}T${cleanTime}`,
+      `DTEND:${cleanDate}T100000`,
+      `SUMMARY:Cita Kia Finance - ${appt.carModel}`,
+      `DESCRIPTION:Cita de ${appt.fullName} para ${appt.carModel}`,
+      "LOCATION:Agencia Kia Local",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+
+    res.setHeader("Content-Type", "text/calendar");
+    res.setHeader("Content-Disposition",
+        `attachment; filename=cita_${appt.id}.ics`);
+    res.send(icsContent);
+  } catch (error) {
+    res.status(500).send("Error generando el calendario.");
   }
 });
 
